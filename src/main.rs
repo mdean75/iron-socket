@@ -10,14 +10,15 @@ use std::process;
 use std::sync::Arc;
 use axum::{Router, ServiceExt};
 use axum::routing::get;
-use tokio::net::{TcpListener, TcpStream};
+use nix::libc::{c_int, c_void, socklen_t};
+use tokio::net::{TcpListener, TcpSocket, TcpStream};
 use tokio::sync::Mutex;
 use tokio::{select, task};
 
 #[tokio::main]
 async fn main() {
     println!("My pid is {}", process::id());
-    run_listener("3000", "127.0.0.1", "").await.unwrap();
+    run_listener("3000", "127.0.0.1", "192.168.40.4").await.unwrap();
 }
 
 async fn run_listener(port: &str, listener_ip: &str, backend_ip: &str) -> Result<String, String> {
@@ -50,14 +51,41 @@ async fn run_listener(port: &str, listener_ip: &str, backend_ip: &str) -> Result
         let (mut client_stream, addr) = listener.accept().await.map_err(|e| e.to_string())?;
 
         println!("Incoming connection from {}", addr);
+        // let f = unsafe { File::from_raw_fd(client_stream.as_raw_fd()) };
+        // println!("fd: {:?}", f.as_fd());
+
+        let sock = TcpSocket::new_v4().unwrap();
+
+        let dest_addr = client_stream.local_addr().unwrap();
+        let orig_addr = client_stream.peer_addr().unwrap();
+
+
+        // 	syscall.SetsockoptInt(sockFD, syscall.SOL_IP, syscall.IP_TRANSPARENT, 1)
+        let result = unsafe {
+            let flag = 1;
+            let flag_ptr = &flag as *const c_int as *const c_void;
+
+            nix::libc::setsockopt(sock.as_raw_fd(), nix::libc::SOL_IP, nix::libc::IP_TRANSPARENT, flag_ptr, ::std::mem::size_of::<c_int>() as socklen_t)
+        };
+
+        println!("setsockopt result: {}", result);
+
+        let bind_res = sock.bind(orig_addr).unwrap();
+        // let connect = sock.connect(dest_addr).await.unwrap();
+
+
+        // nix::sys::socket::bind(sock.as_raw_fd(), client_stream.peer_addr().unwrap())
 
         let server_port = port.clone().to_string();
         let backend_listener_ip = backend_ip.to_string();
         let proxy_listener_ip = listener_ip.to_string();
         let cache_manager = cache.clone();
 
+        // TcpStream::connect()
+
         let conn_handle = tokio::spawn(async move {
-            if let Ok(server_stream) = TcpStream::connect(format!("{}:{}", backend_listener_ip, server_port)).await {
+            if let Ok(server_stream) = sock.connect(dest_addr).await {
+            // if let Ok(server_stream) = TcpStream::connect(format!("{}:{}", backend_listener_ip, server_port)).await {
 
                 let server_local_addr = server_stream.local_addr().unwrap().to_string();
                 let server_peer_addr = server_stream.peer_addr().unwrap().to_string();
