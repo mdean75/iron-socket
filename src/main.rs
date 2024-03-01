@@ -1,9 +1,12 @@
 use std::collections::HashMap;
-use std::io::Write;
+use std::io::{BufReader, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream};
 use std::os::fd::{AsRawFd, FromRawFd};
-use std::{env, fs, process, vec};
+use std::{env, fs, io, process, vec};
+use std::any::Any;
 use std::ffi::{c_char, CString};
+use std::fs::File;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use axum::{Router, ServiceExt};
 use axum::routing::get;
@@ -11,11 +14,16 @@ use clap::Parser;
 use nix::libc;
 use nix::libc::{execv};
 use nix::sys::socket::SockaddrLike;
+use rustls::ClientConfig;
+use rustls_pemfile::{certs, ec_private_keys, pkcs8_private_keys, rsa_private_keys};
+use rustls_pki_types::{CertificateDer, PrivateKeyDer};
 use serde::{Deserialize, Serialize};
 use tokio::net::{TcpListener};
 use tokio::net::TcpStream as TokioTcpStream;
 use tokio::sync::Mutex;
 use tokio::{select, task};
+use tokio::io::split;
+use tokio_rustls::TlsAcceptor;
 
 #[derive(Serialize, Deserialize)]
 struct ConnectionCache {
@@ -47,9 +55,16 @@ async fn restore_connections(port: &str, _listener_ip: &str, backend_ip: &str) {
     let connection_cache: ConnectionCache = serde_json::from_str(saved_conns.as_str()).unwrap();
     connection_cache.cache.iter().for_each(|x| unsafe {
 
+        // let tls_stream = tokio_rustls::TlsStream:
         let std_stream = TcpStream::from_raw_fd(x.fd);
         let stream = TokioTcpStream::from_std(std_stream).unwrap();
 
+        // let tls_stream = tokio_rustls::TlsStream::from(stream);
+        // tls_stream.get_ref().0.
+        let mut config = ClientConfig::new();
+        let mut tls_session = rustls::ClientConnection::new(config, stream);
+// native_tls::TlsConnector::builder().build().unwrap().connect()
+//         tokio_rustls::rustls::ClientConnection::;
         let pport = port.to_string();
         let bbackend_ip = backend_ip.to_string();
 
@@ -145,12 +160,24 @@ async fn run_listener(port: &str, listener_ip: &str, backend_ip: &str) -> Result
             .await.unwrap();
     });
 
+    let certs = load_certs(Path::new("new-certificate.pem")).map_err(|e| e.to_string())?;
+    let key = load_keys(Path::new("new-privatekey.pem")).map_err(|e| e.to_string())?;
+
+    let config = rustls::ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(certs, key)
+        .map_err(|e| e.to_string())?;
+
+    let acceptor = TlsAcceptor::from(Arc::new(config));
+
     let listener = TcpListener::bind(format!("{listener_ip}:{port}"))
         .await.map_err(|e| e.to_string())?;
 
     loop {
         let (client_stream, addr) = listener.accept().await.map_err(|e| e.to_string())?;
 
+        let acceptor = acceptor.clone();
+        // let _conn_handle = tokio::spawn(async move {
         println!("Incoming connection from {}", addr);
 
         let _dest_addr = client_stream.local_addr().unwrap();
@@ -175,12 +202,15 @@ async fn run_listener(port: &str, listener_ip: &str, backend_ip: &str) -> Result
         }
         // client_stream.as_raw_fd().
         let _conn_handle = tokio::spawn(async move {
+            let client_stream = acceptor.accept(client_stream).await.unwrap();
             // if let Ok(server_stream) = sock.connect(dest_addr).await {
             if let Ok(server_stream) = TokioTcpStream::connect(format!("{}:{}", backend_listener_ip, server_port)).await {
-
+// client_stream.as_raw_fd()
+                // client_stream.get_ref().
+                // println!("{:?}", client_stream.get_ref().1.);
                 let cache_fd = client_stream.as_raw_fd();
-                let server_local_addr = client_stream.local_addr().unwrap();//.to_string();
-                let server_peer_addr = client_stream.peer_addr().unwrap();//to_string();
+                let server_local_addr = client_stream.get_ref().0.local_addr().unwrap();//.to_string();
+                let server_peer_addr = client_stream.get_ref().0.peer_addr().unwrap();//to_string();
 
                 {
                     let mut cache_guard = cache_manager.lock().await;
@@ -188,7 +218,7 @@ async fn run_listener(port: &str, listener_ip: &str, backend_ip: &str) -> Result
                 }
 
 
-                let (mut client_read, mut client_write) = client_stream.into_split();
+                let (mut client_read, mut client_write) = split(client_stream);//client_stream.into_split();
                 let (mut server_read, mut server_write) = server_stream.into_split();
 
                 let client_handle = tokio::spawn(async move {
@@ -211,6 +241,26 @@ async fn run_listener(port: &str, listener_ip: &str, backend_ip: &str) -> Result
             }
         });
     }
+}
+
+// fn load_certs() -> Vec<CertificateDer>{
+//     certs(&mut BufReader::new(File::open("").unwrap())).collect()
+// }
+
+fn load_certs(path: &Path) -> io::Result<Vec<CertificateDer<'static>>> {
+    certs(&mut BufReader::new(File::open(path)?)).collect()
+}
+
+fn load_keys(path: &Path) -> io::Result<PrivateKeyDer<'static>> {
+    let  mut key_reader = BufReader::new(File::open(path).unwrap());
+
+    let x = pkcs8_private_keys(&mut key_reader).next();
+    let y = x.unwrap();
+    y.map(Into::into)
+        // .next()
+        // .unwrap()
+        // .map(Into::into);
+    // x
 }
 
 #[derive(Parser, Debug)]
