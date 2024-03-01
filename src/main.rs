@@ -11,6 +11,7 @@ use std::sync::Arc;
 use axum::{Router, ServiceExt};
 use axum::routing::get;
 use clap::Parser;
+use ktls::{CorkStream, KtlsStream};
 use nix::libc;
 use nix::libc::{execv};
 use nix::sys::socket::SockaddrLike;
@@ -18,12 +19,12 @@ use rustls::ClientConfig;
 use rustls_pemfile::{certs, ec_private_keys, pkcs8_private_keys, rsa_private_keys};
 use rustls_pki_types::{CertificateDer, PrivateKeyDer};
 use serde::{Deserialize, Serialize};
-use tokio::net::{TcpListener};
-use tokio::net::TcpStream as TokioTcpStream;
+// use tokio::net::{TcpListener};
+use tokio::net::{TcpListener, TcpStream as TokioTcpStream};
 use tokio::sync::Mutex;
 use tokio::{select, task};
 use tokio::io::split;
-use tokio_rustls::TlsAcceptor;
+use tokio_rustls::{TlsAcceptor, TlsStream};
 
 #[derive(Serialize, Deserialize)]
 struct ConnectionCache {
@@ -61,8 +62,8 @@ async fn restore_connections(port: &str, _listener_ip: &str, backend_ip: &str) {
 
         // let tls_stream = tokio_rustls::TlsStream::from(stream);
         // tls_stream.get_ref().0.
-        let mut config = ClientConfig::new();
-        let mut tls_session = rustls::ClientConnection::new(config, stream);
+        // let mut config = ClientConfig::new();
+        // let mut tls_session = rustls::ClientConnection::new(config, stream);
 // native_tls::TlsConnector::builder().build().unwrap().connect()
 //         tokio_rustls::rustls::ClientConnection::;
         let pport = port.to_string();
@@ -168,9 +169,10 @@ async fn run_listener(port: &str, listener_ip: &str, backend_ip: &str) -> Result
         .with_single_cert(certs, key)
         .map_err(|e| e.to_string())?;
 
-    let acceptor = TlsAcceptor::from(Arc::new(config));
+    let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(config));
 
-    let listener = TcpListener::bind(format!("{listener_ip}:{port}"))
+
+    let listener = tokio_rustls::TlsAcceptor::bind(format!("{listener_ip}:{port}"))
         .await.map_err(|e| e.to_string())?;
 
     loop {
@@ -192,6 +194,8 @@ async fn run_listener(port: &str, listener_ip: &str, backend_ip: &str) -> Result
 
         // TcpStream::connect()
 
+
+
         let new_flags = !libc::FD_CLOEXEC;
         let result = unsafe { libc::fcntl(client_stream.as_raw_fd(), libc::F_SETFD, new_flags) };
         if result == -1 {
@@ -200,14 +204,19 @@ async fn run_listener(port: &str, listener_ip: &str, backend_ip: &str) -> Result
         } else {
             println!("Close on exec flag cleared successfully");
         }
+        // let client_stream = tokio_rustls::server::TlsStream::from(client_stream);
+        let client_stream = CorkStream::new(client_stream);
         // client_stream.as_raw_fd().
         let _conn_handle = tokio::spawn(async move {
             let client_stream = acceptor.accept(client_stream).await.unwrap();
             // if let Ok(server_stream) = sock.connect(dest_addr).await {
             if let Ok(server_stream) = TokioTcpStream::connect(format!("{}:{}", backend_listener_ip, server_port)).await {
-// client_stream.as_raw_fd()
                 // client_stream.get_ref().
+                // ktls::config_ktls_server()
                 // println!("{:?}", client_stream.get_ref().1.);
+                let mut client_stream = ktls::config_ktls_server(client_stream).await.unwrap();
+                // tokio_rustls::server::TlsStream<CorkStream<<unknown>>>`, found `
+                // tokio_rustls::server::TlsStream<CorkStream<<unknown>>>
                 let cache_fd = client_stream.as_raw_fd();
                 let server_local_addr = client_stream.get_ref().0.local_addr().unwrap();//.to_string();
                 let server_peer_addr = client_stream.get_ref().0.peer_addr().unwrap();//to_string();
@@ -216,6 +225,10 @@ async fn run_listener(port: &str, listener_ip: &str, backend_ip: &str) -> Result
                     let mut cache_guard = cache_manager.lock().await;
                     cache_guard.insert(cache_fd.as_raw_fd(), (server_local_addr.clone().to_string(), server_peer_addr.to_string()));
                 }
+
+                // tokio_rustls::server::TlsStream<CorkStream<IO>>
+                // tokio_rustls::server::TlsStream<CorkStream<CorkStream<TcpStream>>>`, found `
+                // tokio_rustls::server::TlsStream<CorkStream<tokio::net::tcp::stream::TcpStream>>`
 
 
                 let (mut client_read, mut client_write) = split(client_stream);//client_stream.into_split();
@@ -254,6 +267,7 @@ fn load_certs(path: &Path) -> io::Result<Vec<CertificateDer<'static>>> {
 fn load_keys(path: &Path) -> io::Result<PrivateKeyDer<'static>> {
     let  mut key_reader = BufReader::new(File::open(path).unwrap());
 
+    rsa_private_keys(&mut key_reader).next();
     let x = pkcs8_private_keys(&mut key_reader).next();
     let y = x.unwrap();
     y.map(Into::into)
