@@ -11,11 +11,9 @@ use std::sync::Arc;
 use axum::{Router, ServiceExt};
 use axum::routing::get;
 use clap::Parser;
-use ktls::{CorkStream, KtlsStream};
-use nix::libc;
-use nix::libc::{execv};
-use nix::sys::socket::SockaddrLike;
-use rustls::ClientConfig;
+// use ktls::{CorkStream, KtlsStream};
+
+use rustls::{Certificate, ClientConfig, PrivateKey};
 use rustls_pemfile::{certs, ec_private_keys, pkcs8_private_keys, rsa_private_keys};
 use rustls_pki_types::{CertificateDer, PrivateKeyDer};
 use serde::{Deserialize, Serialize};
@@ -146,8 +144,8 @@ async fn run_listener(port: &str, listener_ip: &str, backend_ip: &str) -> Result
                     // Create a Vec<*const c_char> with a single element
                     let c_array: Vec<*const c_char> = vec![binary_path.as_ptr(), arg.as_ptr()];
 
-                    let exit_code = execv(binary_path.as_ptr(), c_array.as_ptr());
-                    println!("exit status: {}", exit_code.to_string())
+                    // let exit_code = execv(binary_path.as_ptr(), c_array.as_ptr());
+                    // println!("exit status: {}", exit_code.to_string())
                 }
                 // println!("{:?}", c);
                 "TODO: implement upgrade handler"
@@ -161,10 +159,11 @@ async fn run_listener(port: &str, listener_ip: &str, backend_ip: &str) -> Result
             .await.unwrap();
     });
 
-    let certs = load_certs(Path::new("new-certificate.pem")).map_err(|e| e.to_string())?;
-    let key = load_keys(Path::new("new-privatekey.pem")).map_err(|e| e.to_string())?;
+    let certs = load_certs_again(Path::new("new-certificate.pem")).map_err(|e| e.to_string())?;
+    let key = load_keys_again(Path::new("new-privatekey.pem")).map_err(|e| e.to_string())?;
 
     let config = rustls::ServerConfig::builder()
+        .with_safe_defaults()
         .with_no_client_auth()
         .with_single_cert(certs, key)
         .map_err(|e| e.to_string())?;
@@ -196,16 +195,16 @@ async fn run_listener(port: &str, listener_ip: &str, backend_ip: &str) -> Result
 
 
 
-        let new_flags = !libc::FD_CLOEXEC;
-        let result = unsafe { libc::fcntl(client_stream.as_raw_fd(), libc::F_SETFD, new_flags) };
-        if result == -1 {
-            // Handle error, e.g., using std::io::Error::last_os_error()
-            println!("Error clearing close on exec flag: {}", std::io::Error::last_os_error());
-        } else {
-            println!("Close on exec flag cleared successfully");
-        }
+        // let new_flags = !libc::FD_CLOEXEC;
+        // let result = unsafe { libc::fcntl(client_stream.as_raw_fd(), libc::F_SETFD, new_flags) };
+        // if result == -1 {
+        //     // Handle error, e.g., using std::io::Error::last_os_error()
+        //     println!("Error clearing close on exec flag: {}", std::io::Error::last_os_error());
+        // } else {
+        //     println!("Close on exec flag cleared successfully");
+        // }
         // let client_stream = tokio_rustls::server::TlsStream::from(client_stream);
-        let client_stream = CorkStream::new(client_stream);
+        // let client_stream = CorkStream::new(client_stream);
         // client_stream.as_raw_fd().
         let _conn_handle = tokio::spawn(async move {
             let client_stream = acceptor.accept(client_stream).await.unwrap();
@@ -214,7 +213,7 @@ async fn run_listener(port: &str, listener_ip: &str, backend_ip: &str) -> Result
                 // client_stream.get_ref().
                 // ktls::config_ktls_server()
                 // println!("{:?}", client_stream.get_ref().1.);
-                let mut client_stream = ktls::config_ktls_server(client_stream).await.unwrap();
+                // let mut client_stream = ktls::config_ktls_server(client_stream).await.unwrap();
                 // tokio_rustls::server::TlsStream<CorkStream<<unknown>>>`, found `
                 // tokio_rustls::server::TlsStream<CorkStream<<unknown>>>
                 let cache_fd = client_stream.as_raw_fd();
@@ -260,10 +259,32 @@ async fn run_listener(port: &str, listener_ip: &str, backend_ip: &str) -> Result
 //     certs(&mut BufReader::new(File::open("").unwrap())).collect()
 // }
 
+fn load_certs_again(path: &Path) -> io::Result<Vec<Certificate>> {
+    let file = File::open(path)?;
+    let mut reader = BufReader::new(file);
+    let certs = rustls_pemfile::certs(&mut reader);
+let a = certs.into_iter().map(Certificate).collect();
+    Ok(certs.into_iter().map(Certificate).collect())
+    // let certs: Vec<CertificateDer<'static>> = certs(&mut BufReader::new(File::open(path)?)).collect();
+    // rustls_pemfile::
+}
+
 fn load_certs(path: &Path) -> io::Result<Vec<CertificateDer<'static>>> {
     certs(&mut BufReader::new(File::open(path)?)).collect()
 }
 
+fn load_keys_again(path: &Path) -> io::Result<PrivateKey> {
+    let file = File::open(&path)?;
+    let mut reader = BufReader::new(file);
+    let mut keys = rustls_pemfile::pkcs8_private_keys(&mut reader)?;
+
+    Ok(PrivateKey(keys.remove(0)))
+    // match keys.len() {
+    //     0 => Err(format!("No PKCS8-encoded private key found in {path}").into()),
+    //     1 => Ok(PrivateKey(keys.remove(0))),
+    //     _ => Err(format!("More than one PKCS8-encoded private key found in {path}").into()),
+    // }
+}
 fn load_keys(path: &Path) -> io::Result<PrivateKeyDer<'static>> {
     let  mut key_reader = BufReader::new(File::open(path).unwrap());
 
