@@ -13,8 +13,7 @@ use axum::{Router, ServiceExt};
 use axum::routing::get;
 use clap::Parser;
 use ktls::{CorkStream, KtlsStream};
-use nix::libc;
-use nix::libc::execv;
+use libc::execv;
 
 use rustls::{Certificate, ClientConfig, PrivateKey};
 use rustls_pemfile::{certs, ec_private_keys, pkcs8_private_keys, rsa_private_keys};

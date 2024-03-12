@@ -9,7 +9,7 @@ edition = "2021"
 axum = "0.6.20"
 clap = { version = "4.5.1", features = ["derive"] }
 ktls = "4.0.0"
-nix = "0.28.0"
+libc = { version = "0.2.148", features = ["const-extern-fn"] }
 rustls = "0.21.7"
 rustls-pemfile = "1.0.4"
 rustls-pki-types = "1.3.1"

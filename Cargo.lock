@@ -186,12 +186,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 
 [[package]]
-name = "cfg_aliases"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd16c4719339c4530435d38e511904438d07cce7950afa3718a84ac36c10e89e"
-
-[[package]]
 name = "clap"
 version = "4.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -456,7 +450,7 @@ dependencies = [
  "axum",
  "clap",
  "ktls",
- "nix 0.28.0",
+ "libc",
  "rustls",
  "rustls-pemfile",
  "rustls-pki-types",
@@ -500,7 +494,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d32e94a63f2f71bf1402f8c60c771ac1a51fd5a832d6534edab426f066b053d9"
 dependencies = [
  "libc",
- "nix 0.27.1",
+ "nix",
 ]
 
 [[package]]
@@ -588,18 +582,6 @@ dependencies = [
  "cfg-if",
  "libc",
  "memoffset",
-]
-
-[[package]]
-name = "nix"
-version = "0.28.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab2156c4fce2f8df6c499cc1c763e4394b7482525bf2a9701c9d79d215f519e4"
-dependencies = [
- "bitflags 2.4.2",
- "cfg-if",
- "cfg_aliases",
- "libc",
 ]
 
 [[package]]
