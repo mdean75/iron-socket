@@ -1,14 +1,15 @@
 package main
 
 import (
-	"crypto/tls"
-	"crypto/x509"
+//	"crypto/tls"
 	"encoding/gob"
 	"flag"
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"os/signal"
+	"strconv"
 	"syscall"
 )
 
@@ -66,35 +67,35 @@ func upgrade() {
 
 func runTLS(restore bool) {
 	fmt.Println("starting tls listener")
-	cert, err := tls.LoadX509KeyPair("server-bundle.crt", "server.key")
-	if err != nil {
-		// Handle error
-		fmt.Println("load key pair:", err)
-		return
-	}
+	//cert, err := tls.LoadX509KeyPair("../new-certificate.pem", "../new-privatekey.pem")
+	//if err != nil {
+	//	// Handle error
+	//	fmt.Println("load key pair:", err)
+	//	return
+	//}
 
-	clientCertPool := x509.NewCertPool()
-	pem, err := os.ReadFile("ca-bundle.crt")
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-	f, err := os.Create("keylog.txt")
-	if err != nil {
-		fmt.Println(err)
-	}
-	defer f.Close()
-	clientCertPool.AppendCertsFromPEM(pem)
+	//clientCertPool := x509.NewCertPool()
+	//pem, err := os.ReadFile("ca-bundle.crt")
+	//if err != nil {
+	//	fmt.Println(err)
+	//	return
+	//}
+	//f, err := os.Create("keylog.txt")
+	//if err != nil {
+	//	fmt.Println(err)
+	//}
+	//defer f.Close()
+	//clientCertPool.AppendCertsFromPEM(pem)
 
-	config := &tls.Config{
-		Certificates: []tls.Certificate{cert},
-		CipherSuites: []uint16{
-			tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
-			tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
-		},
-		ClientAuth: tls.RequestClientCert,
-		ClientCAs:  clientCertPool,
-	}
+	//config := &tls.Config{
+	//	Certificates: []tls.Certificate{cert},
+	//	CipherSuites: []uint16{
+	//		tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+	//		tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+	//	},
+	//	ClientAuth: tls.RequestClientCert,
+		//ClientCAs:  clientCertPool,
+	//}
 
 	fmt.Println("restore:", restore)
 	if restore {
@@ -150,17 +151,17 @@ func runTLS(restore bool) {
 		fmt.Println("listen tcp:", err)
 	}
 
-	lis := tls.NewListener(listener, config)
+	//lis := tls.NewListener(listener, config)
 
 	for {
-		conn, err := lis.Accept()
+		conn, err := listener.Accept()
 		if err != nil {
-			fmt.Println("tls accept:", err)
+			fmt.Println("tcp accept:", err)
 			return
 		}
 
 		go func(c net.Conn) {
-			tlsConn := c.(*tls.Conn)
+			//tlsConn := c.(*tls.Conn)
 
 			//if err := tlsConn.Handshake(); err != nil {
 			//	fmt.Println("handshake failure:", err)
@@ -173,8 +174,8 @@ func runTLS(restore bool) {
 			//	return
 			//}
 
-			tlsNetConn := tlsConn.NetConn()
-			tcpConn := tlsNetConn.(*net.TCPConn)
+			//tlsNetConn := tlsConn.NetConn()
+			tcpConn := conn.(*net.TCPConn)
 
 			fmt.Println(tcpConn.LocalAddr())
 			f, err := tcpConn.File()
@@ -194,18 +195,27 @@ func runTLS(restore bool) {
 				fmt.Println(err)
 				return
 			}
+			
+			cmd := exec.Command("/home/dc-user/projects/iron-socket/target/debug/handshaker", "-f", strconv.Itoa(fd))
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				fmt.Println("error calling handshaker:", string(out), err)
+			} else {
+				fmt.Println("handshaker out:", string(out))
+			}
 
-			// ******************************
+
+
 			// instead of performing the tls handshake here, pass fd to Rust subprocess to perform handshake and offload to ktls
 			// ******************************
-			newtlsconn := tls.Server(fileconn, config)
-			buf := make([]byte, 1024)
+			//newtlsconn := tls.Server(fileconn, config)
+			//buf := make([]byte, 1024)
 
 			// make handshake and check multi cid validation
-			if err := newtlsconn.Handshake(); err != nil {
-				fmt.Println("handshake failure:", err)
-				return
-			}
+			//if err := newtlsconn.Handshake(); err != nil {
+			//	fmt.Println("handshake failure:", err)
+			//	return
+			//}
 
 			// ******************************
 
@@ -226,8 +236,9 @@ func runTLS(restore bool) {
 			//}
 			//// Print the exported keying material
 			//fmt.Printf("Exported Keying Material: %x\n", keyingMaterial)
+			buf := make([]byte, 1024)
 			for {
-				_, err := newtlsconn.Read(buf)
+				_, err := fileconn.Read(buf)
 				if err != nil {
 					fmt.Println("tls read:", err)
 					return
